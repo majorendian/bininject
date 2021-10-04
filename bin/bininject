@@ -1,0 +1,141 @@
+#!/usr/bin/env perl
+#
+# Inject a binary file into another
+# file at a specified offset.
+#
+use strict;
+use warnings FATAL => qw(all);
+use autodie;
+
+my $estatus = 0;
+my $VERSION = "v1.0.0";
+my $LICENSE = <<LICENSE;
+Copyright 2021 Ernest Deak
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+LICENSE
+my $USAGE = <<HERE;
+
+USAGE:
+	bininject [target] [offset in hex or decimal] [input.bin]
+	
+OPTIONS:
+	-h | --help 
+		Print this help message
+	-v | --version
+		Print version and license information and exit
+
+EXAMPLE 1:
+	# Write to file target.[...] of any file type, starting at offset 0x100
+	# the binary file input.bin
+	# If the prefix 0x is not specified for the offset parameter
+	# the program assumes the offset to be in decimal format
+
+	bininject target[.exe|.elf|.bin|.n64|.any] 0x100 input.bin
+
+EXAMPLE 2:
+	# Write to file target.exe data comming in from standard input at
+	# an offset of 10 bytes (0x0A)
+
+	cat input.bin | bininject target.exe 10
+
+DOC:
+	BININJECT is a very small and simple utility to effecitevelly inject
+	any code into any file. It has no other special functionality.
+	Its intended use is in either a pipe or standalone in combination
+	with an assembler or compiler with which you generate desired code.
+	Its primary design goal is to patch binary executables and ROM
+	files with arbitrary code, since this task is very common
+	in this field.
+
+LICENSE: BSD 3-Clause
+	Use -v or --version to view full version and license information.
+HERE
+
+my $target = shift;
+my $offset = shift;
+my $inputfile = shift;
+$offset //= 0;
+
+my $trystdin = 0;
+if(not defined $inputfile){
+	$trystdin = 1;
+}
+
+unless($offset =~ m/(?:0x)?([0-9a-fA-F]+)/){
+	print "Offset has an invalid format: $offset\n";
+	print "Must be either hexadecimal or decimal number\n";
+	exit 4;
+}
+
+my $rh = qr/^-h$|^--help$/o;
+my $rv = qr/^-v$|^--version/o;
+
+if(not defined $target or $target =~ m/$rh/ or (defined $offset and $offset =~ m/$rh/)){
+	print $USAGE;
+	exit 0;
+}elsif(defined $target and $target =~ m/$rv/ or (defined $offset and $offset =~ m/$rv/)){
+	print "Bininject $VERSION\n";
+	print "\n==== License ====\n";
+	print $LICENSE;
+	exit 0;
+}
+
+die "$USAGE" unless $inputfile and $target and $offset;
+
+open my $ofh, "+<:raw", $target;
+
+print "Target [$target] does not exist. Exiting\n" and $estatus = 3 and goto PROGEND if not -e $target;
+print "Input file [$inputfile] does not exists. Exiting\n" and $estatus = 3 and goto PROGEND if not -e $inputfile and $inputfile ne "-";
+
+$trystdin = 1 if defined $inputfile and $inputfile eq "-";
+
+my $tmp = $offset;
+no warnings;
+no strict;
+$offset = hex(($offset =~ m/0x(.+)/)[0]);
+print "Injecting data at offset $offset\n";
+$offset //= $tmp; #input is in decimal
+use warnings FATAL => qw(all);
+use strict;
+
+unless($trystdin){
+	my $ifs = -s $inputfile;
+	open my $ifh, "<:raw", $inputfile;
+	if($ifs>0){
+		my $b = "";
+		my $br = read $ifh, $b, $ifs;
+		if($br == $ifs){
+			seek $ofh, $offset, 0;
+			print $ofh $b;
+		}else{
+			print "Unknown IO Error: Size of binary input doesn't match the size of read bytes\n";
+			$estatus = 2;
+		}
+	}else{
+		print "Size of binary input is 0. Exiting.\n";
+		$estatus = 1;
+	}
+	close $ifh;
+}else{
+	unless($inputfile eq "-"){
+		print STDERR "Input file not specified, expecing input from standard input.\n";
+	}
+	local $/ = undef; # we wont buffer. we expect the input to be small enough
+	my $bindata = <STDIN>;
+	close STDIN;
+	print $ofh $bindata;
+}
+
+PROGEND:
+close $ofh;
+exit $estatus;
