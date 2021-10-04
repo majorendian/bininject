@@ -1,6 +1,10 @@
 # bininject
 Binary injection utility.
 
+run `bininject --help` for usage information.
+
+
+
 ### LICENSE
 BSD 3-Clause
 
